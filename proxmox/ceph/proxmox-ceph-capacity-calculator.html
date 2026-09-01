@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proxmox + Ceph capacity calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Archivo+Narrow:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#10202b;--ink-soft:#48606e;--ink-faint:#7d95a2;--paper:#e9eef1;--card:#ffffff;
+  --rule:#cdd8de;--rule-soft:#e2e9ed;--net:#0e7c86;--overhead:#4a58ab;--reserve:#b8722a;
+  --headroom:#9fb0ba;--alarm:#a8352c;--ok:#2f6a3c;--focus:#0e7c86;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Archivo","Helvetica Neue",Arial,sans-serif;font-size:15px;line-height:1.55;font-variant-numeric:tabular-nums}
+.wrap{max-width:1120px;margin:0 auto;padding:32px 24px 72px}
+header.masthead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:18px;border-bottom:2px solid var(--ink);margin-bottom:28px}
+header.masthead h1{font-family:"Archivo Narrow","Archivo",sans-serif;font-weight:600;font-size:30px;line-height:1.1;margin:0;letter-spacing:-0.01em}
+header.masthead p{margin:6px 0 0;color:var(--ink-soft);font-size:14px;max-width:54ch}
+.switches{display:flex;gap:10px;align-items:center}
+.seg-switch{display:flex;border:1px solid var(--ink);border-radius:2px;overflow:hidden}
+.seg-switch button{font:inherit;font-size:13px;padding:6px 14px;border:0;background:transparent;color:var(--ink);cursor:pointer}
+.seg-switch button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.layout{display:grid;grid-template-columns:300px minmax(0,1fr);gap:28px;align-items:start}
+@media (max-width:860px){.layout{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--card);border:1px solid var(--rule);border-radius:3px;padding:20px}
+.panel h2{font-family:"Archivo Narrow","Archivo",sans-serif;font-size:15px;font-weight:600;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--rule-soft)}
+.field{margin-bottom:15px;border-radius:2px}
+.field label{display:block;font-size:13px;color:var(--ink-soft);margin-bottom:5px}
+.field .hint{font-size:12px;color:var(--ink-faint);margin-top:4px;line-height:1.4}
+input[type=number],select{width:100%;font:inherit;font-size:15px;padding:7px 9px;border:1px solid var(--rule);border-radius:2px;background:#fff;color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--net)}
+input:focus-visible,select:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.linkbadge{color:var(--net);font-size:12px}
+.presets{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.presets button{font:inherit;font-size:12.5px;padding:5px 10px;background:#fff;color:var(--ink-soft);border:1px solid var(--rule);border-radius:2px;cursor:pointer}
+.presets button:hover{border-color:var(--ink);color:var(--ink)}
+[data-tip]{cursor:help}
+.field[data-tip] label,.stat[data-tip] dt,.legend span[data-tip],table.detail th[data-tip]{text-decoration:underline;text-decoration-style:dotted;text-decoration-color:var(--rule);text-underline-offset:3px}
+.field[data-tip]:hover,.stat[data-tip]:hover{background:#f7fafb}
+#tip{position:fixed;z-index:60;max-width:310px;padding:9px 12px;background:var(--ink);color:#f2f6f8;font-size:13px;line-height:1.5;border-radius:3px;pointer-events:none;opacity:0;transform:translateY(3px);transition:opacity .12s ease,transform .12s ease}
+#tip[data-show="1"]{opacity:1;transform:translateY(0)}
+#tip b{display:block;font-weight:600;color:#fff;margin-bottom:2px}
+.ledger{background:var(--card);border:1px solid var(--rule);border-radius:3px;padding:24px 24px 18px;margin-bottom:20px}
+.ledger-top{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:18px}
+.headline-num{font-family:"Archivo Narrow","Archivo",sans-serif;font-weight:600;font-size:clamp(38px,7vw,60px);line-height:0.95;letter-spacing:-0.02em;color:var(--net)}
+.headline-num span{font-size:0.42em;color:var(--ink-soft);font-weight:500;margin-left:6px;letter-spacing:0}
+.headline-side{text-align:right;font-size:13px;color:var(--ink-soft);line-height:1.6}
+.headline-side b{font-weight:600;color:var(--ink)}
+.headline-side div{border-radius:2px;padding:0 2px}
+.headline-side div:hover{background:#f2f6f8}
+.band{display:flex;height:44px;border:1px solid var(--ink);border-radius:2px;overflow:hidden}
+.band div{transition:width .18s ease,filter .12s ease}
+.band div:hover{filter:brightness(1.12)}
+.sg-net{background:var(--net)}
+.sg-over{background:var(--overhead)}
+.sg-res{background:var(--reserve)}
+.sg-head{background:var(--headroom)}
+.ruler{position:relative;height:26px;margin-top:2px}
+.ruler span{position:absolute;top:0;font-size:11.5px;color:var(--ink-faint);transform:translateX(-50%);white-space:nowrap}
+.ruler span::before{content:"";display:block;width:1px;height:6px;background:var(--rule);margin:0 auto 3px}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:14px;font-size:13px;color:var(--ink-soft)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:7px;vertical-align:-1px}
+.legend b{font-weight:500;color:var(--ink)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:3px;overflow:hidden;margin-bottom:20px}
+.stat{background:var(--card);padding:15px 16px}
+.stat dt{font-size:12.5px;color:var(--ink-soft);margin:0 0 3px;display:inline-block}
+.stat dd{margin:0;font-family:"Archivo Narrow","Archivo",sans-serif;font-size:25px;font-weight:600;line-height:1.15}
+.stat .sub{font-size:12px;color:var(--ink-faint);font-family:"Archivo",sans-serif;font-weight:400}
+.alerts{margin-bottom:20px}
+.alert{display:flex;gap:10px;padding:11px 14px;border-left:3px solid;background:#fff;border-top:1px solid var(--rule-soft);border-right:1px solid var(--rule-soft);border-bottom:1px solid var(--rule-soft);font-size:13.5px;line-height:1.5;margin-bottom:8px}
+.alert.bad{border-left-color:var(--alarm)}
+.alert.warn{border-left-color:var(--reserve)}
+.alert.good{border-left-color:var(--ok)}
+.alert strong{font-weight:600}
+table.detail{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--rule);border-radius:3px;font-size:14px}
+table.detail caption{text-align:left;font-family:"Archivo Narrow","Archivo",sans-serif;font-weight:600;font-size:15px;padding:14px 16px 10px;border-bottom:1px solid var(--rule-soft)}
+table.detail th,table.detail td{padding:9px 16px;text-align:left;border-bottom:1px solid var(--rule-soft)}
+table.detail th{font-weight:400;color:var(--ink-soft);width:58%}
+table.detail td{text-align:right;font-weight:500}
+table.detail tr:last-child th,table.detail tr:last-child td{border-bottom:0}
+table.detail tbody tr:hover{background:#f7fafb}
+.scenarios td.pick{color:var(--net);font-weight:600}
+.footnote{margin-top:26px;font-size:13px;color:var(--ink-soft);max-width:78ch}
+.footnote h3{font-family:"Archivo Narrow","Archivo",sans-serif;font-size:14px;margin:18px 0 6px;color:var(--ink)}
+.footnote p{margin:0 0 8px}
+.toolbar{display:flex;gap:8px;margin-top:22px;flex-wrap:wrap}
+.toolbar button{font:inherit;font-size:13.5px;padding:8px 14px;border:1px solid var(--ink);background:#fff;color:var(--ink);border-radius:2px;cursor:pointer}
+.toolbar button:hover{background:var(--ink);color:#fff}
+#copied{font-size:13px;color:var(--ok);align-self:center}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media print{body{background:#fff}.panel,.ledger,.stats,table.detail{border-color:#999}.toolbar,#tip,.switches{display:none}}
+</style>
+</head>
+<body>
+<div id="tip" role="tooltip" aria-hidden="true"></div>
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <h1 data-i18n="title">Proxmox + Ceph capacity calculator</h1>
+    <p data-i18n="subtitle">Enter the cluster you are planning.</p>
+  </div>
+  <div class="switches">
+    <div class="seg-switch" role="group" aria-label="Language" data-i18n="tipLang">
+      <button type="button" id="l-en" aria-pressed="true">EN</button>
+      <button type="button" id="l-it" aria-pressed="false">IT</button>
+    </div>
+    <div class="seg-switch" role="group" aria-label="Units" data-i18n="tipUnit">
+      <button type="button" id="u-tb" aria-pressed="true">TB</button>
+      <button type="button" id="u-tib" aria-pressed="false">TiB</button>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <form class="panel" id="controls" autocomplete="off">
+    <h2 data-i18n="h2cluster">Cluster</h2>
+
+    <div class="field" data-i18n="tipPx">
+      <label for="px"><span data-i18n="fPx">Proxmox nodes</span></label>
+      <input type="number" id="px" min="1" max="128" step="1" value="4">
+    </div>
+
+    <div class="field" data-i18n="tipCn">
+      <label for="cn"><span data-i18n="fCn">Ceph nodes</span> <span class="linkbadge" id="linkbadge"></span></label>
+      <input type="number" id="cn" min="1" max="128" step="1" value="4">
+      <div class="hint" data-i18n="cnHint"></div>
+    </div>
+
+    <div class="field" data-i18n="tipMode">
+      <label for="mode"><span data-i18n="fMode">Per-node storage entered as</span></label>
+      <select id="mode">
+        <option value="total" selected data-i18n="optTotal">Total raw TB per node</option>
+        <option value="disks" data-i18n="optDisks">Disks per node by disk size</option>
+      </select>
+    </div>
+
+    <div class="field" id="f-total" data-i18n="tipPernode">
+      <label for="pernode"><span data-i18n="fPernode">Raw TB per node</span></label>
+      <input type="number" id="pernode" min="0.1" step="0.1" value="15.36">
+    </div>
+
+    <div class="field pair" id="f-disks" hidden data-i18n="tipDisks">
+      <div>
+        <label for="disks"><span data-i18n="fOsds">OSDs / node</span></label>
+        <input type="number" id="disks" min="1" max="60" step="1" value="4">
+      </div>
+      <div>
+        <label for="disksize"><span data-i18n="fEach">TB each</span></label>
+        <input type="number" id="disksize" min="0.1" step="0.1" value="3.84">
+      </div>
+    </div>
+
+    <h2 style="margin-top:22px" data-i18n="h2protect">Data protection</h2>
+
+    <div class="field" data-i18n="tipProt">
+      <label for="prot"><span data-i18n="fProt">Pool profile</span></label>
+      <select id="prot">
+        <option value="r3" selected data-i18n="optR3">Replica 3 (size 3, min_size 2)</option>
+        <option value="r2" data-i18n="optR2">Replica 2 (size 2, min_size 1)</option>
+        <option value="r4" data-i18n="optR4">Replica 4 (size 4, min_size 2)</option>
+        <option value="ec22" data-i18n="optEc22">Erasure coding 2+2</option>
+        <option value="ec42" data-i18n="optEc42">Erasure coding 4+2</option>
+        <option value="ec43" data-i18n="optEc43">Erasure coding 4+3</option>
+        <option value="ec62" data-i18n="optEc62">Erasure coding 6+2</option>
+        <option value="ec83" data-i18n="optEc83">Erasure coding 8+3</option>
+      </select>
+    </div>
+
+    <div class="field" data-i18n="tipFail">
+      <label for="fail"><span data-i18n="fFail">Keep room to self-heal after</span></label>
+      <select id="fail">
+        <option value="0" data-i18n="optF0">No reserve, plan on every node</option>
+        <option value="1" selected data-i18n="optF1">1 node lost</option>
+        <option value="2" data-i18n="optF2">2 nodes lost</option>
+      </select>
+      <div class="hint" data-i18n="failHint"></div>
+    </div>
+
+    <div class="field" data-i18n="tipFill">
+      <label for="fill"><span data-i18n="fFill">Fill target</span> <b id="fill-out">80%</b></label>
+      <input type="range" id="fill" min="50" max="95" step="1" value="80">
+      <div class="hint" data-i18n="fillHint"></div>
+    </div>
+
+    <div class="field" style="margin-bottom:0" data-i18n="tipPresets">
+      <label><span data-i18n="fPresets">Presets</span></label>
+      <div class="presets">
+        <button type="button" data-preset="starter" data-i18n="pStarter">3-node starter</button>
+        <button type="button" data-preset="prod" data-i18n="pProd">5-node production</button>
+        <button type="button" data-preset="ec" data-i18n="pEc">8-node EC archive</button>
+      </div>
+    </div>
+  </form>
+
+  <main>
+    <section class="ledger" aria-labelledby="net-label">
+      <div class="ledger-top">
+        <div data-i18n="tipNet">
+          <div id="net-label" style="font-size:13px;color:var(--ink-soft);margin-bottom:4px" data-i18n="netLabel">Net usable for VMs and containers</div>
+          <div class="headline-num" id="net-value">0<span id="net-unit">TB</span></div>
+        </div>
+        <div class="headline-side">
+          <div data-i18n="tipRaw"><span data-i18n="rawLabel">Raw installed</span> <b id="raw-value"></b></div>
+          <div data-i18n="tipEff"><span data-i18n="effLabel">Storage efficiency</span> <b id="eff-value"></b></div>
+          <div data-i18n="tipCost"><span data-i18n="costPre">1 TB usable costs</span> <b id="cost-value"></b> <span data-i18n="costPost">raw</span></div>
+        </div>
+      </div>
+
+      <div class="band" role="img" id="band-desc">
+        <div class="sg-net" id="b-net" style="width:25%" data-i18n="tipSegNet"></div>
+        <div class="sg-over" id="b-over" style="width:50%" data-i18n="tipSegOver"></div>
+        <div class="sg-res" id="b-res" style="width:15%" data-i18n="tipSegRes"></div>
+        <div class="sg-head" id="b-head" style="width:10%" data-i18n="tipSegHead"></div>
+      </div>
+      <div class="ruler" id="ruler" data-i18n="tipRuler"></div>
+
+      <div class="legend">
+        <span data-i18n="tipSegNet"><i style="background:var(--net)"></i><span data-i18n="legNet">Net usable</span> <b id="l-net"></b></span>
+        <span data-i18n="tipSegOver"><i style="background:var(--overhead)"></i><span data-i18n="legOver">Replica or parity copies</span> <b id="l-over"></b></span>
+        <span data-i18n="tipSegRes"><i style="background:var(--reserve)"></i><span data-i18n="legRes">Self-heal reserve</span> <b id="l-res"></b></span>
+        <span data-i18n="tipSegHead"><i style="background:var(--headroom)"></i><span data-i18n="legHead">Fill headroom</span> <b id="l-head"></b></span>
+      </div>
+    </section>
+
+    <dl class="stats">
+      <div class="stat" data-i18n="tipStProt"><dt data-i18n="stProt">After protection only</dt><dd id="s-prot"></dd><div class="sub" id="s-prot-sub"></div></div>
+      <div class="stat" data-i18n="tipStNode"><dt data-i18n="stNode">Per Proxmox node</dt><dd id="s-node"></dd><div class="sub" data-i18n="stNodeSub"></div></div>
+      <div class="stat" data-i18n="tipStOsd"><dt data-i18n="stOsd">Total OSDs</dt><dd id="s-osd"></dd><div class="sub" id="s-osd-sub"></div></div>
+      <div class="stat" data-i18n="tipStPg"><dt data-i18n="stPg">Suggested pg_num</dt><dd id="s-pg"></dd><div class="sub" data-i18n="stPgSub"></div></div>
+    </dl>
+
+    <div class="alerts" id="alerts"></div>
+
+    <table class="detail">
+      <caption data-i18n="capFailure">Behaviour under failure</caption>
+      <tbody>
+        <tr><th scope="row" data-i18n="rTol">Host failures survived without data loss</th><td id="d-tol"></td></tr>
+        <tr><th scope="row" data-i18n="rWrite">Host failures survived while still accepting writes</th><td id="d-write"></td></tr>
+        <tr><th scope="row" id="th-blast" data-i18n="rBlast">Data blocked if hosts fail at once</th><td id="d-blast"></td></tr>
+        <tr><th scope="row" data-i18n="rRebuild">Raw data to recreate when one host dies</th><td id="d-rebuild"></td></tr>
+        <tr><th scope="row" data-i18n="rAfter">Utilisation after one host loss</th><td id="d-after"></td></tr>
+        <tr><th scope="row" data-i18n="rMin">Minimum nodes this profile needs</th><td id="d-min"></td></tr>
+        <tr><th scope="row" data-i18n="rProd">Recommended minimum for production</th><td id="d-prod"></td></tr>
+        <tr><th scope="row" data-i18n="rLeft">Nodes left after the planned reserve</th><td id="d-left"></td></tr>
+      </tbody>
+    </table>
+
+    <table class="detail scenarios" style="margin-top:20px">
+      <caption data-i18n="capScen">Same hardware, other pool profiles</caption>
+      <thead><tr><th scope="col" data-i18n="thProfile">Profile</th><td data-i18n="thNet">Net usable</td></tr></thead>
+      <tbody id="scen"></tbody>
+    </table>
+
+    <div class="toolbar">
+      <button type="button" id="btn-link" data-i18n="tipBtnLink">Copy shareable link</button>
+      <button type="button" id="btn-summary" data-i18n="tipBtnSum">Copy summary</button>
+      <button type="button" id="btn-print" data-i18n="tipBtnPrint">Print</button>
+      <span id="copied" hidden></span>
+    </div>
+
+    <div class="footnote">
+      <h3 data-i18n="fnH1">How the number is built</h3>
+      <p data-i18n="fnP1"></p>
+      <p data-i18n="fnP2"></p>
+      <h3 data-i18n="fnH2">Two assumptions worth checking</h3>
+      <p data-i18n="fnP3"></p>
+      <p data-i18n="fnP4"></p>
+    </div>
+  </main>
+</div>
+</div>
+
+<script>
+(function(){
+var EN={
+ title:{t:"Proxmox + Ceph capacity calculator"},
+ subtitle:{t:"Enter the cluster you are planning. You get raw capacity, what Ceph keeps after protection, and how much of that you can fill before the cluster stops accepting writes. Hover anything to see what it means."},
+ tipLang:{tt:"Language",tip:"Switches every label, tooltip and warning between English and Italian. Numbers reformat to the local decimal convention."},
+ tipUnit:{tt:"Decimal or binary",tip:"Drives are sold in decimal TB, Ceph reports binary TiB. Identical bytes, a 9% different number. Pick the one your invoice or your dashboard uses."},
+ h2cluster:{t:"Cluster"},h2protect:{t:"Data protection"},
+ fPx:{t:"Proxmox nodes"},
+ tipPx:{tt:"Proxmox nodes",tip:"Hypervisor hosts in the cluster. In a hyperconverged design these same hosts carry the OSDs, the daemons that own the Ceph disks. Three is the practical minimum for quorum without a witness."},
+ fCn:{t:"Ceph nodes"},cnBadge:{t:"follows Proxmox"},
+ cnHint:{t:"Change this only if some Proxmox nodes run no OSDs."},
+ tipCn:{tt:"Ceph nodes",tip:"Hosts that actually run OSDs. Ceph spreads replicas across hosts, not disks, so this number drives every capacity and failure figure on this page."},
+ fMode:{t:"Per-node storage entered as"},optTotal:{t:"Total raw TB per node"},optDisks:{t:"Disks per node by disk size"},
+ tipMode:{tt:"Input style",tip:"One total per host if you already know it. Disk count and size if you are still choosing drives, which also gives you the OSD count and the placement group suggestion."},
+ fPernode:{t:"Raw TB per node"},
+ tipPernode:{tt:"Raw TB per node",tip:"All OSD disk capacity on one host, before any Ceph overhead. Boot disks and the Proxmox root filesystem are not part of this, they never become OSDs."},
+ fOsds:{t:"OSDs / node"},fEach:{t:"TB each"},
+ tipDisks:{tt:"Disks per node",tip:"One OSD per data disk is the norm. More, smaller OSDs recover faster, spread load more evenly and lose less capacity when one dies, at the cost of roughly 3 to 5 GB of RAM each."},
+ fProt:{t:"Pool profile"},
+ optR3:{t:"Replica 3 (size 3, min_size 2)"},optR2:{t:"Replica 2 (size 2, min_size 1)"},optR4:{t:"Replica 4 (size 4, min_size 2)"},
+ optEc22:{t:"Erasure coding 2+2"},optEc42:{t:"Erasure coding 4+2"},optEc43:{t:"Erasure coding 4+3"},optEc62:{t:"Erasure coding 6+2"},optEc83:{t:"Erasure coding 8+3"},
+ tipProt:{tt:"Pool profile",tip:"How Ceph protects each object. Replica keeps N whole copies on N different hosts, cheap on CPU and fast to write. Erasure coding splits objects into k data plus m parity chunks across k+m hosts, saving space but costing write latency."},
+ fFail:{t:"Keep room to self-heal after"},optF0:{t:"No reserve, plan on every node"},optF1:{t:"1 node lost"},optF2:{t:"2 nodes lost"},
+ failHint:{t:"Reserves one node's worth of space so Ceph can rebuild instead of sitting degraded."},
+ tipFail:{tt:"Self-heal reserve",tip:"Capacity held back so the surviving hosts can absorb a dead one's data. Skip it and the cluster still survives the failure, but it stays degraded until the hardware comes back, with no protection against a second one."},
+ fFill:{t:"Fill target"},
+ fillHint:{t:"Ceph warns at 85% (nearfull) and stops writes at 95% (full)."},
+ tipFill:{tt:"Fill target",tip:"The ceiling you plan against. Ceph raises nearfull at 85% and stops writes cluster-wide at 95%, and both ratios watch the fullest OSD rather than the average, so the real limit arrives earlier than the arithmetic suggests."},
+ fPresets:{t:"Presets"},pStarter:{t:"3-node starter"},pProd:{t:"5-node production"},pEc:{t:"8-node EC archive"},
+ tipPresets:{tt:"Presets",tip:"A minimal lab, a normal production build, an archive built for capacity. Loading one overwrites the fields. Edit from there."},
+ netLabel:{t:"Net usable for VMs and containers"},
+ tipNet:{tt:"Net usable",tip:"What guests can actually consume. Raw capacity, minus replica or parity copies, minus the self-heal reserve, minus the gap to your fill target. This is the number to quote when someone asks how big the cluster is."},
+ rawLabel:{t:"Raw installed"},
+ tipRaw:{tt:"Raw installed",tip:"Every OSD disk added together, before Ceph touches it. The number on the purchase order and the one vendors quote."},
+ effLabel:{t:"Storage efficiency"},
+ tipEff:{tt:"Storage efficiency",tip:"Net usable as a share of raw. Replica 3 with a one-node reserve and an 80% target lands near 20%, which surprises people who budgeted for 33%."},
+ costPre:{t:"1 TB usable costs"},costPost:{t:"raw"},
+ tipCost:{tt:"Cost per usable terabyte",tip:"Raw terabytes you have to buy for each usable one. Multiply by your price per TB to get the real cost of guest storage."},
+ legNet:{t:"Net usable"},legOver:{t:"Replica or parity copies"},legRes:{t:"Self-heal reserve"},legHead:{t:"Fill headroom"},
+ tipSegNet:{tt:"Net usable",tip:"Space available to VM disks, container volumes and CephFS, once every deduction is applied."},
+ tipSegOver:{tt:"Replica or parity copies",tip:"Capacity consumed by redundancy itself. Fixed by the pool profile and effectively permanent, since changing size on a live pool rewrites the whole cluster."},
+ tipSegRes:{tt:"Self-heal reserve",tip:"Deliberately empty space so Ceph can re-replicate onto the surviving hosts after a node dies. Fill it and recovery has nowhere to go."},
+ tipSegHead:{tt:"Fill headroom",tip:"The gap between your fill target and the full ratio. Absorbs uneven OSD usage, snapshot growth and the temporary spike backfill causes."},
+ tipRuler:{tt:"Scale",tip:"Ticks run from empty to total raw capacity, in the unit selected at the top of the page."},
+ stProt:{t:"After protection only"},
+ tipStProt:{tt:"After protection only",tip:"Raw divided by the replica count, or multiplied by k/(k+m) for erasure coding. The theoretical ceiling, before the failure reserve and the fill limit take their share. Most vendor calculators stop here."},
+ stNode:{t:"Per Proxmox node"},stNodeSub:{t:"average VM storage share"},
+ tipStNode:{tt:"Per Proxmox node",tip:"Net usable divided by the Proxmox node count. A rough guide for how much guest storage each host can carry. Ceph does not tie a VM's data to the host running it, so treat this as an average, not a limit."},
+ stOsd:{t:"Total OSDs"},
+ tipStOsd:{tt:"Total OSDs",tip:"OSD daemons across the cluster. Each is a separate process needing roughly 3 to 5 GB of RAM, which has to be subtracted from what you thought was available for VMs."},
+ stPg:{t:"Suggested pg_num"},stPgSub:{t:"about 100 PGs per OSD, power of two"},
+ tipStPg:{tt:"Suggested pg_num",tip:"Placement groups for the pool, at about 100 per OSD and rounded to a power of two. Too few and data lands unevenly. Too many and monitors and OSDs burn CPU. The autoscaler refines it later, this is the starting point."},
+ capFailure:{t:"Behaviour under failure"},
+ rTol:{t:"Host failures survived without data loss",tt:"Failures survived",tip:"Hosts that can fail with every object still present and readable. One below this and data is gone, not merely offline."},
+ rWrite:{t:"Host failures survived while still accepting writes",tt:"Failures survived while writable",tip:"Governed by min_size, which is 2 on a replica 3 pool and k+1 on an erasure coded one. Below that threshold Ceph blocks IO on the affected placement groups on purpose. It picks consistency over availability, so VMs freeze instead of corrupting."},
+ rBlast:{t:"Data blocked if {d} hosts fail at once",tt:"Blast radius",tip:"Placement groups do not all sit on the same hosts, so a multiple failure hits only a share of the data. That share falls fast as hosts are added: with replica 3 it is 50% on four hosts, 30% on five, 20% on six, 7% on ten."},
+ rAfter:{t:"Utilisation after one host loss",tt:"Post-failure utilisation",tip:"Where the surviving OSDs land once the dead host's data has been recreated. The same bytes now sit on one host fewer, so usage climbs by N/(N-1): a third more on four hosts, a quarter more on five. Past 85% backfill stops, past 95% the cluster stops accepting writes."},
+ rProd:{t:"Recommended minimum for production",tt:"Production minimum",tip:"The copies need size hosts. One more so a failed host can be rebuilt somewhere. One more so a planned reboot does not eat the rebuild host. That gives size plus two, which is why replica 3 clusters are usually built with five."},
+ noRebuild:{t:"rebuild not possible"},
+ rRebuild:{t:"Raw data to recreate when one host dies",tt:"Rebuild volume",tip:"Data Ceph must push across the network to restore redundancy after one host dies. Divide by your usable network throughput to estimate how long the cluster stays degraded."},
+ rMin:{t:"Minimum nodes this profile needs",tt:"Minimum nodes",tip:"With a host failure domain, a replica 3 pool needs 3 hosts and an EC k+m pool needs k+m. Below that, placement groups never reach active+clean and the pool refuses writes."},
+ rLeft:{t:"Nodes left after the planned reserve",tt:"Nodes after reserve",tip:"How many hosts the capacity plan assumes are available. This is the count the net figure is actually built on."},
+ capScen:{t:"Same hardware, other pool profiles",tt:"Profile comparison",tip:"The same disks under every other pool profile, at your current reserve and fill target. The highlighted row is the profile selected on the left."},
+ thProfile:{t:"Profile"},thNet:{t:"Net usable"},
+ tipBtnLink:{t:"Copy shareable link",tt:"Shareable link",tip:"Copies a URL carrying every input, so a colleague opens the page on this exact configuration. Inside a sandboxed preview the URL cannot be rewritten, so it copies the settings code instead."},
+ btnLinkAlt:{t:"Copy settings code"},
+ tipBtnSum:{t:"Copy summary",tt:"Plain text summary",tip:"Copies the inputs and results as text, ready to paste into a ticket, a mail or a sizing document."},
+ tipBtnPrint:{t:"Print",tt:"Print",tip:"Prints the current result with controls removed. Save as PDF for an attachment."},
+ copied:{t:"Copied"},
+ fnH1:{t:"How the number is built"},
+ fnP1:{t:"Raw capacity is nodes multiplied by per-node disk capacity, in decimal TB as drives are sold. Ceph reports TiB, about 9% smaller, so the unit switch at the top shows both views of the same cluster."},
+ fnP2:{t:"Protection divides that raw pool: replica 3 keeps one third, erasure coding k+m keeps k of every k+m chunks. The self-heal reserve then removes one node's worth of capacity from the plan, because a cluster that cannot re-replicate after losing a host stays degraded until the hardware comes back. The fill target then trims what is left, since Ceph blocks backfill at nearfull and blocks writes entirely at full."},
+ fnH2:{t:"Two assumptions worth checking"},
+ fnP3:{t:"The CRUSH failure domain is host. That is the Proxmox default and it is what makes node-level failure math valid. If your nodes hold unequal capacity, CRUSH weighting makes the smallest node the real constraint, so size on the smallest node multiplied by node count rather than on the sum."},
+ fnP4:{t:"Thin provisioning means you can allocate more to guests than the net figure, and that is normal. The net figure has to cover blocks actually written plus RBD snapshots, which grow with change rate rather than with disk size."},
+ pt_r2:"Two copies. Half the raw capacity, and with min_size 1 a second failure during rebuild loses data outright.",
+ pt_r3:"Three copies on three hosts. The Proxmox and Ceph default, and the right answer for VM storage in almost every cluster.",
+ pt_r4:"Four copies. Rarely justified except across two rooms or racks where you want two copies on each side.",
+ pt_ec22:"Two data plus two parity chunks. Same 50% efficiency as replica 2 but survives two failures, at the cost of EC write latency.",
+ pt_ec42:"Four data plus two parity. Keeps 67% of raw and tolerates two host losses. The common starting point for backup and archive pools.",
+ pt_ec43:"Four data plus three parity. Tolerates three host losses at 57% efficiency, useful when rebuild windows are long.",
+ pt_ec62:"Six data plus two parity. 75% efficiency, but every write and every recovery touches eight hosts.",
+ pt_ec83:"Eight data plus three parity. 73% efficiency and high fault tolerance, only sensible on large clusters.",
+ ptShort:" This cluster does not have the {n} hosts it requires.",
+ needs:"(needs {n} nodes)",
+ host:function(n){return n===1?"host":"hosts";},
+ plusHeal:"{n} (plus one to heal)",
+ nodesLeft:"{a} of {b}",
+ protSub:"factor {f}, before reserve and fill limit",
+ osdSub:"{s} TB each, {n} per node",
+ osdSubOff:"switch input to disks per node",
+ aUnderTitle:"Undersized cluster.",aUnder:"With {cn} Ceph nodes and a profile that needs {need}, placement groups never reach active+clean and the pool refuses writes.",
+ aHealTitle:"No room to heal.",aHeal:"At exactly {need} nodes Ceph survives a host loss but cannot re-replicate. It stays degraded until the node returns, and a second failure is fatal.",
+ aR2Title:"Replica 2 is not a production choice.",aR2:"With min_size 1 a second disk failure during rebuild loses data outright, and split brain becomes possible.",
+ aEcTitle:"Erasure coding has a cost.",aEc:"On Proxmox, RBD over EC needs a replicated metadata pool alongside the EC data pool, and every partial write becomes a read-modify-write across {chunks} hosts. Good for backups and cold volumes, rarely for busy VMs.",
+ aResTitle:"Reserve exceeds redundancy.",aRes:"After {f} node failures you drop below the {need} nodes this profile requires.",
+ aFillTitle:"Fill target above nearfull.",aFill:"Ceph raises a nearfull warning at 85% and refuses backfill. OSD usage is never even, so the fullest OSD trips the ratio well before the average does.",
+ aDisagTitle:"More Ceph nodes than Proxmox nodes.",aDisag:"That is a disaggregated design rather than hyperconverged. Confirm it is deliberate.",
+ aOkTitle:"Sizing holds.",aOk:"The cluster can lose a host, rebuild onto the survivors and stay under nearfull.",
+ aMaintTitle:"Only one spare host.",aMaint:"With {n} hosts and {size} copies, one host down for maintenance leaves exactly the {size} the pool needs. Ceph keeps serving, but it has nowhere to rebuild a second failure, and a permanent host loss raises usage on the survivors by {amp}%. Lose {d} hosts at once and {blast}% of the data drops below min_size {ms} and stops accepting writes. In production this profile is normally built on {rec} hosts.",
+ aAmpTitle:"Not enough free space to rebuild.",aAmp:"A planned fill of {fill}% becomes {after}% on the survivors after one host loss, because the same data has to fit on {left} hosts instead of {n}. Ceph blocks backfill at 85% and every write at 95%, so the rebuild would stall before it finishes. Lower the fill target or reserve a node.",
+ aBlastTitle:"Wide blast radius.",aBlast:"Each placement group sits on {size} of {n} hosts, so losing {d} at once takes {blast}% of the data below min_size {ms}. That share stops accepting writes until a copy comes back.",
+ sumTitle:"Proxmox + Ceph capacity plan",sumPx:"Proxmox nodes",sumCn:"Ceph nodes",sumPer:"Raw per node",sumRaw:"Raw total",
+ sumProf:"Profile",sumRes:"Self-heal reserve",sumFill:"Fill target",sumAfter:"After protection",sumNet:"Net usable",sumEff:"Efficiency",sumNodes:"node(s)"
+};
+var IT={
+ title:{t:"Calcolatore di capacità Proxmox + Ceph"},
+ subtitle:{t:"Inserisci il cluster che stai dimensionando. Ottieni la capacità grezza, quella che resta dopo la protezione Ceph e quanta ne puoi riempire prima che il cluster smetta di accettare scritture. Passa il mouse su qualsiasi voce per la spiegazione."},
+ tipLang:{tt:"Lingua",tip:"Cambia etichette, spiegazioni e avvisi fra inglese e italiano. I numeri si riformattano con la convenzione decimale locale."},
+ tipUnit:{tt:"Decimale o binario",tip:"I dischi si vendono in TB decimali, Ceph riporta TiB binari. Stessi byte, numero diverso del 9 per cento. Scegli l'unità che usi in offerta o a dashboard."},
+ h2cluster:{t:"Cluster"},h2protect:{t:"Protezione dei dati"},
+ fPx:{t:"Nodi Proxmox"},
+ tipPx:{tt:"Nodi Proxmox",tip:"Gli host hypervisor del cluster. In un progetto iperconvergente sono gli stessi che ospitano gli OSD, i demoni che gestiscono i dischi Ceph. Tre è il minimo pratico per avere quorum senza un nodo arbitro."},
+ fCn:{t:"Nodi Ceph"},cnBadge:{t:"segue Proxmox"},
+ cnHint:{t:"Cambialo solo se alcuni nodi Proxmox non hanno OSD."},
+ tipCn:{tt:"Nodi Ceph",tip:"Gli host che eseguono davvero gli OSD. Ceph distribuisce le repliche fra host, non fra dischi, quindi questo numero governa ogni calcolo di capacità e di guasto della pagina."},
+ fMode:{t:"Storage per nodo indicato come"},optTotal:{t:"TB grezzi totali per nodo"},optDisks:{t:"Dischi per nodo e taglia del disco"},
+ tipMode:{tt:"Modalità di inserimento",tip:"Il totale per host se lo conosci già. Numero e taglia dei dischi se stai ancora scegliendo, e in quel caso ottieni anche il conteggio degli OSD e il suggerimento sui placement group."},
+ fPernode:{t:"TB grezzi per nodo"},
+ tipPernode:{tt:"TB grezzi per nodo",tip:"Tutta la capacità dei dischi destinati agli OSD su un host, prima di qualsiasi overhead Ceph. I dischi di boot e il filesystem di root di Proxmox non rientrano, non diventano mai OSD."},
+ fOsds:{t:"OSD per nodo"},fEach:{t:"TB ciascuno"},
+ tipDisks:{tt:"Dischi per nodo",tip:"Un OSD per disco dati è la norma. Dischi più numerosi e più piccoli ricostruiscono prima, distribuiscono meglio il carico e fanno perdere meno capacità quando uno si guasta, al prezzo di circa 3 o 5 GB di RAM ciascuno."},
+ fProt:{t:"Profilo del pool"},
+ optR3:{t:"Replica 3 (size 3, min_size 2)"},optR2:{t:"Replica 2 (size 2, min_size 1)"},optR4:{t:"Replica 4 (size 4, min_size 2)"},
+ optEc22:{t:"Erasure coding 2+2"},optEc42:{t:"Erasure coding 4+2"},optEc43:{t:"Erasure coding 4+3"},optEc62:{t:"Erasure coding 6+2"},optEc83:{t:"Erasure coding 8+3"},
+ tipProt:{tt:"Profilo del pool",tip:"Come Ceph protegge ogni oggetto. La replica tiene N copie intere su N host diversi, costa poca CPU ed è veloce in scrittura. L'erasure coding spezza l'oggetto in k frammenti di dati più m di parità distribuiti su k+m host, risparmia spazio ma paga in latenza di scrittura."},
+ fFail:{t:"Spazio per ricostruire dopo"},optF0:{t:"Nessuna riserva, calcola su tutti i nodi"},optF1:{t:"1 nodo perso"},optF2:{t:"2 nodi persi"},
+ failHint:{t:"Tiene libero lo spazio di un nodo perché Ceph possa ricostruire invece di restare degradato."},
+ tipFail:{tt:"Riserva di ricostruzione",tip:"Capacità tenuta libera perché gli host superstiti assorbano i dati di quello guasto. Senza riserva il cluster sopravvive lo stesso, ma resta degradato finché l'hardware non torna e un secondo guasto lo trova scoperto."},
+ fFill:{t:"Soglia di riempimento"},
+ fillHint:{t:"Ceph avvisa all'85% (nearfull) e blocca le scritture al 95% (full)."},
+ tipFill:{tt:"Soglia di riempimento",tip:"Il tetto su cui pianificare. Ceph alza l'allarme nearfull all'85 per cento e blocca le scritture su tutto il cluster al 95, e le due soglie guardano l'OSD più pieno invece della media, quindi il limite reale arriva prima di quanto dica l'aritmetica."},
+ fPresets:{t:"Configurazioni pronte"},pStarter:{t:"Starter 3 nodi"},pProd:{t:"Produzione 5 nodi"},pEc:{t:"Archivio EC 8 nodi"},
+ tipPresets:{tt:"Configurazioni pronte",tip:"Un laboratorio minimo, una produzione normale, un archivio pensato per la capacità. Caricarne una sovrascrive i campi. Poi modifichi da lì."},
+ netLabel:{t:"Capacità netta per VM e container"},
+ tipNet:{tt:"Capacità netta",tip:"Quello che le macchine possono davvero occupare. Capacità grezza meno le copie di replica o parità, meno la riserva di ricostruzione, meno il margine fino alla soglia di riempimento. È il numero da dire quando ti chiedono quanto è grande il cluster."},
+ rawLabel:{t:"Grezzo installato"},
+ tipRaw:{tt:"Grezzo installato",tip:"Tutti i dischi OSD sommati, prima che Ceph ci metta mano. È il numero dell'ordine di acquisto e quello che citano i fornitori."},
+ effLabel:{t:"Efficienza dello storage"},
+ tipEff:{tt:"Efficienza dello storage",tip:"La capacità netta come quota del grezzo. Con replica 3, riserva di un nodo e soglia all'80 per cento si arriva intorno al 20 per cento, cosa che sorprende chi aveva messo a budget il 33."},
+ costPre:{t:"1 TB netto costa"},costPost:{t:"di grezzo"},
+ tipCost:{tt:"Costo per terabyte netto",tip:"I terabyte grezzi da comprare per ogni terabyte utilizzabile. Moltiplicalo per il prezzo al TB per avere il costo reale dello storage delle macchine."},
+ legNet:{t:"Capacità netta"},legOver:{t:"Copie di replica o parità"},legRes:{t:"Riserva di ricostruzione"},legHead:{t:"Margine di riempimento"},
+ tipSegNet:{tt:"Capacità netta",tip:"Spazio disponibile per i dischi delle VM, i volumi dei container e CephFS, una volta applicate tutte le detrazioni."},
+ tipSegOver:{tt:"Copie di replica o parità",tip:"Capacità consumata dalla ridondanza stessa. La fissa il profilo del pool ed è di fatto permanente, perché cambiare size su un pool vivo riscrive l'intero cluster."},
+ tipSegRes:{tt:"Riserva di ricostruzione",tip:"Spazio lasciato vuoto di proposito perché Ceph possa ricreare le copie sugli host superstiti dopo la perdita di un nodo. Se lo riempi, la ricostruzione non ha dove andare."},
+ tipSegHead:{tt:"Margine di riempimento",tip:"Il margine fra la tua soglia e il limite full. Assorbe il riempimento disomogeneo degli OSD, la crescita degli snapshot e il picco temporaneo del backfill."},
+ tipRuler:{tt:"Scala",tip:"Le tacche vanno da vuoto alla capacità grezza totale, nell'unità scelta in alto."},
+ stProt:{t:"Dopo la sola protezione"},
+ tipStProt:{tt:"Dopo la sola protezione",tip:"Il grezzo diviso per il numero di repliche, oppure moltiplicato per k/(k+m) con l'erasure coding. È il tetto teorico, prima che riserva e soglia di riempimento prendano la loro parte. Molti calcolatori dei fornitori si fermano qui."},
+ stNode:{t:"Per nodo Proxmox"},stNodeSub:{t:"quota media di storage per VM"},
+ tipStNode:{tt:"Per nodo Proxmox",tip:"La capacità netta divisa per il numero di nodi Proxmox. Dà un'idea di quanto storage per le macchine regge ogni host. Ceph non lega i dati di una VM all'host che la esegue, quindi è una media, non un limite."},
+ stOsd:{t:"OSD totali"},
+ tipStOsd:{tt:"OSD totali",tip:"I demoni OSD di tutto il cluster. Ognuno è un processo separato che vuole circa 3 o 5 GB di RAM, da sottrarre a quella che credevi disponibile per le VM."},
+ stPg:{t:"pg_num suggerito"},stPgSub:{t:"circa 100 PG per OSD, potenza di due"},
+ tipStPg:{tt:"pg_num suggerito",tip:"I placement group del pool, circa 100 per OSD arrotondati a una potenza di due. Troppo pochi e i dati si distribuiscono male. Troppi e monitor e OSD bruciano CPU. L'autoscaler poi lo corregge, questo è il punto di partenza."},
+ capFailure:{t:"Comportamento sotto guasto"},
+ rTol:{t:"Guasti host tollerati senza perdita di dati",tt:"Guasti tollerati",tip:"Gli host che possono guastarsi con tutti gli oggetti ancora presenti e leggibili. Uno in più e i dati non sono offline, sono persi."},
+ rWrite:{t:"Guasti host tollerati continuando a scrivere",tt:"Guasti tollerati in scrittura",tip:"Lo governa min_size, che vale 2 su un pool replica 3 e k+1 su uno erasure coded. Sotto quella soglia Ceph blocca l'I/O sui placement group coinvolti di proposito. Sceglie la coerenza al posto della disponibilità, quindi le VM si fermano invece di corrompersi."},
+ rBlast:{t:"Dati bloccati se cadono {d} host insieme",tt:"Raggio d'impatto",tip:"I placement group non stanno tutti sugli stessi host, quindi un guasto multiplo colpisce solo una quota dei dati. La quota cala in fretta aggiungendo host: con replica 3 è il 50% su quattro host, il 30% su cinque, il 20% su sei, il 7% su dieci."},
+ rAfter:{t:"Occupazione dopo la perdita di un host",tt:"Occupazione dopo il guasto",tip:"Dove finiscono gli OSD superstiti una volta ricreati i dati dell'host guasto. Gli stessi byte stanno su un host in meno, quindi l'occupazione sale di N/(N-1): un terzo in più su quattro host, un quarto in più su cinque. Oltre l'85% il backfill si ferma, oltre il 95% il cluster smette di accettare scritture."},
+ rProd:{t:"Minimo consigliato in produzione",tt:"Minimo di produzione",tip:"Le copie richiedono size host. Uno in più perché un host guasto possa essere ricostruito da qualche parte. Un altro ancora perché un riavvio pianificato non si mangi l'host di ricostruzione. Fa size più due, ed è il motivo per cui i cluster replica 3 si fanno con cinque nodi."},
+ noRebuild:{t:"ricostruzione impossibile"},
+ rRebuild:{t:"Dati grezzi da ricreare alla perdita di un host",tt:"Volume di ricostruzione",tip:"I dati che Ceph deve spostare in rete per ripristinare la ridondanza dopo la perdita di un host. Dividili per la banda utile della rete per stimare quanto resta degradato il cluster."},
+ rMin:{t:"Nodi minimi richiesti dal profilo",tt:"Nodi minimi",tip:"Con failure domain host, un pool replica 3 vuole 3 host e un pool EC k+m ne vuole k+m. Sotto quella soglia i placement group non arrivano mai ad active+clean e il pool rifiuta le scritture."},
+ rLeft:{t:"Nodi che restano dopo la riserva",tt:"Nodi dopo la riserva",tip:"Quanti host dà per disponibili il calcolo della capacità. È il conteggio su cui è costruito il numero netto."},
+ capScen:{t:"Stesso hardware, altri profili di pool",tt:"Confronto fra profili",tip:"Gli stessi dischi con ogni altro profilo, alla riserva e alla soglia attuali. La riga evidenziata è il profilo selezionato a sinistra."},
+ thProfile:{t:"Profilo"},thNet:{t:"Capacità netta"},
+ tipBtnLink:{t:"Copia link condivisibile",tt:"Link condivisibile",tip:"Copia un indirizzo che porta con sé tutti i dati inseriti, così un collega apre la pagina su questa configurazione. Dentro un'anteprima in sandbox l'indirizzo non si può riscrivere, quindi copia il codice delle impostazioni."},
+ btnLinkAlt:{t:"Copia codice impostazioni"},
+ tipBtnSum:{t:"Copia riepilogo",tt:"Riepilogo testuale",tip:"Copia dati inseriti e risultati come testo, pronti da incollare in un ticket, in una mail o in un documento di dimensionamento."},
+ tipBtnPrint:{t:"Stampa",tt:"Stampa",tip:"Stampa il risultato attuale senza i controlli. Salva come PDF se ti serve un allegato."},
+ copied:{t:"Copiato"},
+ fnH1:{t:"Come nasce il numero"},
+ fnP1:{t:"La capacità grezza è il numero di nodi per la capacità dei dischi di ogni nodo, in TB decimali come vengono venduti. Ceph riporta TiB, circa il 9 per cento in meno, quindi il selettore in alto mostra le due letture dello stesso cluster."},
+ fnP2:{t:"La protezione divide quel totale: la replica 3 ne tiene un terzo, l'erasure coding k+m tiene k frammenti ogni k+m. La riserva toglie poi dal piano la capacità di un nodo, perché un cluster che non riesce a ricreare le copie dopo la perdita di un host resta degradato finché l'hardware non torna. La soglia di riempimento taglia poi quello che resta, visto che Ceph blocca il backfill a nearfull e ferma del tutto le scritture a full."},
+ fnH2:{t:"Due ipotesi da verificare"},
+ fnP3:{t:"Il failure domain CRUSH è l'host. È il default di Proxmox ed è quello che rende validi i calcoli sui guasti di nodo. Se i nodi hanno capacità diverse, il peso CRUSH rende il nodo più piccolo il vincolo reale: dimensiona sul nodo più piccolo moltiplicato per il numero di nodi, non sulla somma."},
+ fnP4:{t:"Il thin provisioning permette di assegnare alle macchine più spazio di quanto dica il numero netto, ed è normale farlo. Il numero netto però deve coprire i blocchi scritti davvero più gli snapshot RBD, che crescono con il tasso di modifica e non con la dimensione del disco."},
+ pt_r2:"Due copie. Metà della capacità grezza, e con min_size 1 un secondo guasto durante la ricostruzione perde i dati.",
+ pt_r3:"Tre copie su tre host. Il default di Proxmox e di Ceph, e la risposta giusta per lo storage delle VM in quasi ogni cluster.",
+ pt_r4:"Quattro copie. Si giustifica di rado, se non fra due sale o due rack dove vuoi due copie per lato.",
+ pt_ec22:"Due frammenti di dati più due di parità. Stessa efficienza del 50 per cento della replica 2 ma sopravvive a due guasti, al prezzo della latenza EC in scrittura.",
+ pt_ec42:"Quattro di dati più due di parità. Tiene il 67 per cento del grezzo e tollera la perdita di due host. Il punto di partenza abituale per i pool di backup e archivio.",
+ pt_ec43:"Quattro di dati più tre di parità. Tollera tre host persi al 57 per cento di efficienza, utile quando le finestre di ricostruzione sono lunghe.",
+ pt_ec62:"Sei di dati più due di parità. Efficienza del 75 per cento, ma ogni scrittura e ogni recupero toccano otto host.",
+ pt_ec83:"Otto di dati più tre di parità. Efficienza del 73 per cento e alta tolleranza ai guasti, sensato solo su cluster grandi.",
+ ptShort:" Questo cluster non ha gli {n} host richiesti.",
+ needs:"(servono {n} nodi)",
+ host:function(){return "host";},
+ plusHeal:"{n} (più uno per ricostruire)",
+ nodesLeft:"{a} di {b}",
+ protSub:"fattore {f}, prima di riserva e soglia",
+ osdSub:"{s} TB ciascuno, {n} per nodo",
+ osdSubOff:"passa all'inserimento per dischi",
+ aUnderTitle:"Cluster sottodimensionato.",aUnder:"Con {cn} nodi Ceph e un profilo che ne richiede {need}, i placement group non arrivano mai ad active+clean e il pool rifiuta le scritture.",
+ aHealTitle:"Nessuno spazio per ricostruire.",aHeal:"Con esattamente {need} nodi Ceph sopravvive alla perdita di un host ma non può ricreare le copie. Resta degradato finché il nodo non torna, e un secondo guasto è fatale.",
+ aR2Title:"La replica 2 non è una scelta da produzione.",aR2:"Con min_size 1 un secondo guasto disco durante la ricostruzione perde i dati, e diventa possibile lo split brain.",
+ aEcTitle:"L'erasure coding ha un costo.",aEc:"Su Proxmox, RBD su EC richiede un pool di metadati replicato accanto al pool dati EC, e ogni scrittura parziale diventa un ciclo di lettura, modifica e riscrittura su {chunks} host. Va bene per backup e volumi freddi, raramente per VM attive.",
+ aResTitle:"La riserva supera la ridondanza.",aRes:"Dopo {f} nodi persi scendi sotto i {need} richiesti dal profilo.",
+ aFillTitle:"Soglia oltre il nearfull.",aFill:"Ceph alza l'allarme nearfull all'85 per cento e rifiuta il backfill. Gli OSD non si riempiono mai in modo uniforme, quindi il più pieno fa scattare la soglia molto prima della media.",
+ aDisagTitle:"Più nodi Ceph che nodi Proxmox.",aDisag:"È un progetto disaggregato, non iperconvergente. Verifica che sia voluto.",
+ aOkTitle:"Il dimensionamento regge.",aOk:"Il cluster può perdere un host, ricostruire sui superstiti e restare sotto il nearfull.",
+ aMaintTitle:"Un solo host di scorta.",aMaint:"Con {n} host e {size} copie, un host fermo per manutenzione lascia esattamente i {size} che il pool richiede. Ceph continua a servire, ma non ha dove ricostruire un secondo guasto, e la perdita definitiva di un host alza l'occupazione sui superstiti del {amp}%. Se cadono {d} host insieme, il {blast}% dei dati scende sotto min_size {ms} e smette di accettare scritture. In produzione questo profilo si costruisce di norma su {rec} host.",
+ aAmpTitle:"Spazio libero insufficiente per ricostruire.",aAmp:"Il riempimento previsto del {fill}% diventa {after}% sui superstiti dopo la perdita di un host, perché gli stessi dati devono stare su {left} host invece che su {n}. Ceph blocca il backfill all'85% e ogni scrittura al 95%, quindi la ricostruzione si fermerebbe prima di finire. Abbassa la soglia o riserva un nodo.",
+ aBlastTitle:"Raggio d'impatto largo.",aBlast:"Ogni placement group sta su {size} host su {n}, quindi perderne {d} insieme porta il {blast}% dei dati sotto min_size {ms}. Quella quota smette di accettare scritture finché una copia non torna.",
+ sumTitle:"Piano di capacità Proxmox + Ceph",sumPx:"Nodi Proxmox",sumCn:"Nodi Ceph",sumPer:"Grezzo per nodo",sumRaw:"Grezzo totale",
+ sumProf:"Profilo",sumRes:"Riserva di ricostruzione",sumFill:"Soglia di riempimento",sumAfter:"Dopo la protezione",sumNet:"Capacità netta",sumEff:"Efficienza",sumNodes:"nodo/i"
+};
+var DICT={en:EN,it:IT}, lang="en", L=EN;
+
+var PROFILES={
+  r2:{label:"Replica 2",type:"r",n:2,minsize:1},
+  r3:{label:"Replica 3",type:"r",n:3,minsize:2},
+  r4:{label:"Replica 4",type:"r",n:4,minsize:2},
+  ec22:{label:"EC 2+2",type:"e",k:2,m:2},
+  ec42:{label:"EC 4+2",type:"e",k:4,m:2},
+  ec43:{label:"EC 4+3",type:"e",k:4,m:3},
+  ec62:{label:"EC 6+2",type:"e",k:6,m:2},
+  ec83:{label:"EC 8+3",type:"e",k:8,m:3}
+};
+var TIB=1.099511627776;
+var $=function(id){return document.getElementById(id);};
+var el={px:$("px"),cn:$("cn"),mode:$("mode"),pernode:$("pernode"),disks:$("disks"),
+        disksize:$("disksize"),prot:$("prot"),fail:$("fail"),fill:$("fill")};
+var unit="TB", linked=true;
+
+function sub(s,o){return s.replace(/\{(\w+)\}/g,function(m,k){return o[k]!==undefined?o[k]:m;});}
+function num(v,dec){
+  try{return v.toLocaleString(lang==="it"?"it-IT":"en-US",{minimumFractionDigits:dec,maximumFractionDigits:dec});}
+  catch(e){return v.toFixed(dec);}
+}
+function conv(tb){return unit==="TB"?tb:tb/TIB;}
+function fmt(tb){
+  var v=conv(tb);
+  if(v>=1000) return num(v/1000,2)+" P"+unit.slice(1);
+  return num(v,2)+" "+unit;
+}
+
+var tip=$("tip"), tipTarget=null;
+function showTip(node){
+  var key=node.getAttribute("data-i18n"), e=key?L[key]:null;
+  if(node.hasAttribute("data-tiptext")) e={tt:node.getAttribute("data-tiptitle"),tip:node.getAttribute("data-tiptext")};
+  if(!e||!e.tip) return;
+  while(tip.firstChild) tip.removeChild(tip.firstChild);
+  if(e.tt){var b=document.createElement("b");b.textContent=e.tt;tip.appendChild(b);}
+  tip.appendChild(document.createTextNode(e.tip));
+  tip.setAttribute("data-show","1");tip.setAttribute("aria-hidden","false");
+  tipTarget=node;
+  var r=node.getBoundingClientRect(), t=tip.getBoundingClientRect();
+  var left=Math.max(8,Math.min(r.left+r.width/2-t.width/2,window.innerWidth-t.width-8));
+  var top=r.top-t.height-10;
+  if(top<8) top=r.bottom+10;
+  tip.style.left=Math.round(left)+"px";tip.style.top=Math.round(top)+"px";
+}
+function hideTip(){tip.setAttribute("data-show","0");tip.setAttribute("aria-hidden","true");tipTarget=null;}
+function tipNode(t){return t&&t.closest?t.closest("[data-i18n],[data-tiptext]"):null;}
+document.addEventListener("mouseover",function(e){var n=tipNode(e.target);if(n&&n!==tipTarget)showTip(n);});
+document.addEventListener("mouseout",function(e){var n=tipNode(e.target);if(n&&n===tipTarget&&!n.contains(e.relatedTarget))hideTip();});
+document.addEventListener("focusin",function(e){var n=tipNode(e.target);if(n)showTip(n);else hideTip();});
+document.addEventListener("focusout",hideTip);
+document.addEventListener("keydown",function(e){if(e.key==="Escape")hideTip();});
+window.addEventListener("scroll",function(){if(tipTarget)showTip(tipTarget);},true);
+window.addEventListener("resize",hideTip);
+
+function applyLang(){
+  L=DICT[lang];
+  document.documentElement.lang=lang;
+  document.title=L.title.t;
+  Array.prototype.forEach.call(document.querySelectorAll("[data-i18n]"),function(n){
+    var e=L[n.getAttribute("data-i18n")];
+    if(!e) return;
+    if(e.t!==undefined&&!n.querySelector("[data-i18n],input,select,b")) n.textContent=e.t;
+    if(e.tip){n.setAttribute("data-tip","1");}else{n.removeAttribute("data-tip");}
+  });
+  $("l-en").setAttribute("aria-pressed",lang==="en");
+  $("l-it").setAttribute("aria-pressed",lang==="it");
+  $("linkbadge").textContent=linked?L.cnBadge.t:"";
+  $("copied").textContent=L.copied.t;
+  $("btn-link").textContent=hashOk?L.tipBtnLink.t:L.btnLinkAlt.t;
+  makeReachable();
+}
+function makeReachable(){
+  Array.prototype.forEach.call(document.querySelectorAll("[data-tip]"),function(n){
+    if(n.hasAttribute("tabindex")) return;
+    if(n.querySelector("input,select,button,textarea,a")) return;
+    if(/^(INPUT|SELECT|BUTTON|TEXTAREA|A)$/.test(n.tagName)) return;
+    n.setAttribute("tabindex","0");
+  });
+}
+function pow2(n){
+  if(n<1) return 1;
+  var lo=Math.pow(2,Math.floor(Math.log(n)/Math.LN2));
+  return (n-lo)<(lo*2-n)?lo:lo*2;
+}
+function factorOf(p){return p.type==="r"?1/p.n:p.k/(p.k+p.m);}
+function minNodes(p){return p.type==="r"?p.n:p.k+p.m;}
+// size = hosts a PG occupies, ms = min_size, need = chunks required to read the object
+function spec(p){
+  return p.type==="r" ? {size:p.n,ms:p.minsize,need:1}
+                      : {size:p.k+p.m,ms:p.k+1,need:p.k};
+}
+function comb(n,k){
+  if(k<0||n<0||k>n) return 0;
+  var r=1;
+  for(var i=1;i<=k;i++) r=r*(n-k+i)/i;
+  return r;
+}
+// share of placement groups that lose at least d of their hosts when h hosts fail together
+function blastShare(N,size,h,d){
+  if(N<size||h<d) return 0;
+  var tot=comb(N,h);
+  if(!tot) return 0;
+  var acc=0;
+  for(var j=d;j<=Math.min(h,size);j++) acc+=comb(size,j)*comb(N-size,h-j);
+  return acc/tot;
+}
+function perNodeTB(){
+  if(el.mode.value==="disks") return Math.max(0.1,(parseFloat(el.disks.value)||1)*(parseFloat(el.disksize.value)||0.1));
+  return Math.max(0.1,parseFloat(el.pernode.value)||0.1);
+}
+function compute(){
+  var px=Math.max(1,parseInt(el.px.value)||1);
+  if(linked) el.cn.value=px;
+  var cn=Math.max(1,parseInt(el.cn.value)||1);
+  var per=perNodeTB(), p=PROFILES[el.prot.value];
+  var F=parseInt(el.fail.value), fill=(parseInt(el.fill.value)||80)/100, f=factorOf(p);
+  var planNodes=Math.max(0,cn-F);
+  var sp=spec(p);
+  var writeTol=sp.size-sp.ms, dataTol=sp.size-sp.need, d=writeTol+1;
+  var steady=fill*planNodes/cn;                        // share of raw actually written
+  var survivors=cn-1;
+  var after1=survivors>=sp.size?steady*cn/survivors:null;   // per-host use once rebuilt
+  return {px:px,cn:cn,per:per,p:p,F:F,fill:fill,f:f,raw:cn*per,planNodes:planNodes,
+          afterProt:cn*per*f,afterFail:planNodes*per*f,net:planNodes*per*f*fill,
+          osds:el.mode.value==="disks"?cn*(parseInt(el.disks.value)||1):null,
+          sp:sp,writeTol:writeTol,dataTol:dataTol,d:d,steady:steady,survivors:survivors,
+          after1:after1,amp:survivors>0?cn/survivors:null,
+          blast:blastShare(cn,sp.size,d,d),rec:sp.size+2};
+}
+function drawRuler(raw){
+  var host=$("ruler");
+  while(host.firstChild) host.removeChild(host.firstChild);
+  for(var i=0;i<=5;i++){
+    var s=document.createElement("span"), v=conv(raw*i/5);
+    s.style.left=(i*20)+"%";
+    if(i===0) s.style.transform="translateX(0)";
+    if(i===5) s.style.transform="translateX(-100%)";
+    s.textContent=(v>=1000?num(v/1000,1)+"P":num(v,conv(raw)<20?1:0));
+    host.appendChild(s);
+  }
+}
+function alerts(r){
+  var out=[], p=r.p, need=minNodes(p);
+  var sp=r.sp, blastPct=Math.round(r.blast*100);
+  if(r.cn<need) out.push(["bad",L.aUnderTitle,sub(L.aUnder,{cn:r.cn,need:need})]);
+  else if(r.cn===need) out.push(["warn",L.aHealTitle,sub(L.aHeal,{need:need})]);
+  else if(r.cn===sp.size+1) out.push(["warn",L.aMaintTitle,sub(L.aMaint,{
+      n:r.cn,size:sp.size,ms:sp.ms,d:r.d,rec:r.rec,
+      amp:Math.round((r.amp-1)*100),blast:blastPct})]);
+  if(r.after1!==null&&r.after1>0.85) out.push([r.after1>0.95?"bad":"warn",L.aAmpTitle,sub(L.aAmp,{
+      fill:Math.round(r.steady*100),after:Math.round(r.after1*100),left:r.survivors,n:r.cn})]);
+  if(r.cn>sp.size+1&&r.blast>=0.25) out.push(["warn",L.aBlastTitle,sub(L.aBlast,{
+      n:r.cn,size:sp.size,ms:sp.ms,d:r.d,blast:blastPct})]);
+  if(p.type==="r"&&p.n===2) out.push(["bad",L.aR2Title,L.aR2]);
+  if(p.type==="e") out.push(["warn",L.aEcTitle,sub(L.aEc,{chunks:p.k+p.m})]);
+  if(r.cn-r.F<need&&r.cn>=need) out.push(["warn",L.aResTitle,sub(L.aRes,{f:r.F,need:need})]);
+  if(r.fill>0.85) out.push(["warn",L.aFillTitle,L.aFill]);
+  if(r.cn>r.px) out.push(["warn",L.aDisagTitle,L.aDisag]);
+  if(r.cn>=r.rec&&r.after1!==null&&r.after1<=0.85&&r.blast<0.25&&!(p.type==="r"&&p.n===2))
+    out.push(["good",L.aOkTitle,L.aOk]);
+  var box=$("alerts");
+  while(box.firstChild) box.removeChild(box.firstChild);
+  out.forEach(function(a){
+    var d=document.createElement("div");d.className="alert "+a[0];
+    var inner=document.createElement("div"), s=document.createElement("strong");
+    s.textContent=a[1];inner.appendChild(s);inner.appendChild(document.createTextNode(" "+a[2]));
+    d.appendChild(inner);box.appendChild(d);
+  });
+}
+function scenarios(r){
+  var body=$("scen");
+  while(body.firstChild) body.removeChild(body.firstChild);
+  Object.keys(PROFILES).forEach(function(key){
+    var p=PROFILES[key], viable=r.cn>=minNodes(p);
+    var n=Math.max(0,r.cn-r.F)*r.per*factorOf(p)*r.fill;
+    var tr=document.createElement("tr"), th=document.createElement("th"), td=document.createElement("td");
+    th.scope="row";th.setAttribute("tabindex","0");th.setAttribute("data-tip","1");
+    th.setAttribute("data-tiptitle",p.label);
+    th.setAttribute("data-tiptext",L["pt_"+key]+(viable?"":sub(L.ptShort,{n:minNodes(p)})));
+    th.textContent=p.label+(viable?"":" "+sub(L.needs,{n:minNodes(p)}));
+    if(key===el.prot.value) td.className="pick";
+    td.textContent=viable?fmt(n):L.na;
+    tr.appendChild(th);tr.appendChild(td);body.appendChild(tr);
+  });
+}
+function render(){
+  var r=compute(), p=r.p;
+  $("fill-out").textContent=Math.round(r.fill*100)+"%";
+  $("net-value").firstChild.nodeValue=(conv(r.net)>=1000?num(conv(r.net)/1000,2):num(conv(r.net),2));
+  $("net-unit").textContent=conv(r.net)>=1000?("P"+unit.slice(1)):unit;
+  $("raw-value").textContent=fmt(r.raw);
+  var eff=r.raw>0?r.net/r.raw*100:0;
+  $("eff-value").textContent=num(eff,1)+"%";
+  $("cost-value").textContent=eff>0?num(100/eff,2)+" TB":L.na;
+  var overhead=r.raw-r.afterProt, reserve=r.afterProt-r.afterFail, head=r.afterFail-r.net, tot=r.raw||1;
+  $("b-net").style.width=(r.net/tot*100)+"%";
+  $("b-over").style.width=(overhead/tot*100)+"%";
+  $("b-res").style.width=(reserve/tot*100)+"%";
+  $("b-head").style.width=(head/tot*100)+"%";
+  $("band-desc").setAttribute("aria-label",L.legNet.t+" "+fmt(r.net)+", "+L.legOver.t+" "+fmt(overhead)+", "+L.legRes.t+" "+fmt(reserve)+", "+L.legHead.t+" "+fmt(head));
+  $("l-net").textContent=fmt(r.net);$("l-over").textContent=fmt(overhead);
+  $("l-res").textContent=fmt(reserve);$("l-head").textContent=fmt(head);
+  drawRuler(r.raw);
+  $("s-prot").textContent=fmt(r.afterProt);
+  $("s-prot-sub").textContent=sub(L.protSub,{f:num(r.f,3)});
+  $("s-node").textContent=fmt(r.net/r.px);
+  if(r.osds){
+    var per=parseInt(el.disks.value)||1;
+    $("s-osd").textContent=r.osds;
+    $("s-osd-sub").textContent=sub(L.osdSub,{s:num(r.per/per,2),n:per});
+    $("s-pg").textContent=pow2(r.osds*100/(p.type==="r"?p.n:(p.k+p.m)));
+  }else{
+    $("s-osd").textContent=L.na;$("s-osd-sub").textContent=L.osdSubOff;$("s-pg").textContent=L.na;
+  }
+  $("d-tol").textContent=r.dataTol+" "+L.host(r.dataTol);
+  $("d-write").textContent=r.writeTol+" "+L.host(r.writeTol);
+  $("th-blast").textContent=sub(L.rBlast.t,{d:r.d});
+  $("d-blast").textContent=num(r.blast*100,0)+"%";
+  $("d-rebuild").textContent=fmt(r.per*r.fill);
+  $("d-after").textContent=r.after1===null?L.noRebuild.t:num(r.after1*100,0)+"%";
+  $("d-prod").textContent=r.rec+" "+L.host(r.rec);
+  $("d-min").textContent=sub(L.plusHeal,{n:minNodes(p)});
+  $("d-left").textContent=sub(L.nodesLeft,{a:r.planNodes,b:r.cn});
+  alerts(r);scenarios(r);writeHash();
+}
+
+var lastState="", hashOk=true;
+function writeHash(){
+  lastState=[el.px.value,el.cn.value,el.mode.value,el.pernode.value,el.disks.value,
+         el.disksize.value,el.prot.value,el.fail.value,el.fill.value,unit,lang].join("|");
+  if(!hashOk) return;
+  try{ history.replaceState(null,"","#"+encodeURIComponent(lastState)); }
+  catch(e){ hashOk=false; $("btn-link").textContent=L.btnLinkAlt.t; }
+}
+function readHash(){
+  if(!location.hash) return;
+  var v;
+  try{ v=decodeURIComponent(location.hash.slice(1)).split("|"); }catch(e){ return; }
+  if(v.length<10||!PROFILES[v[6]]) return;
+  el.px.value=v[0];el.cn.value=v[1];el.mode.value=v[2];el.pernode.value=v[3];
+  el.disks.value=v[4];el.disksize.value=v[5];el.prot.value=v[6];el.fail.value=v[7];el.fill.value=v[8];
+  unit=v[9]==="TiB"?"TiB":"TB";
+  if(v[10]&&DICT[v[10]]) lang=v[10];
+  linked=(v[0]===v[1]);
+}
+function setUnitButtons(){
+  $("u-tb").setAttribute("aria-pressed",unit==="TB");
+  $("u-tib").setAttribute("aria-pressed",unit==="TiB");
+}
+function syncMode(){
+  var d=el.mode.value==="disks";
+  $("f-disks").hidden=!d;$("f-total").hidden=d;
+}
+var PRESETS={
+  starter:{px:3,cn:3,mode:"disks",disks:4,disksize:1.92,prot:"r3",fail:0,fill:75},
+  prod:{px:5,cn:5,mode:"disks",disks:6,disksize:3.84,prot:"r3",fail:1,fill:80},
+  ec:{px:8,cn:8,mode:"disks",disks:8,disksize:16,prot:"ec42",fail:1,fill:80}
+};
+Array.prototype.forEach.call(document.querySelectorAll("[data-preset]"),function(b){
+  b.addEventListener("click",function(){
+    var p=PRESETS[b.getAttribute("data-preset")];
+    el.px.value=p.px;el.cn.value=p.cn;el.mode.value=p.mode;el.disks.value=p.disks;
+    el.disksize.value=p.disksize;el.prot.value=p.prot;el.fail.value=p.fail;el.fill.value=p.fill;
+    linked=true;$("linkbadge").textContent=L.cnBadge.t;
+    syncMode();render();
+  });
+});
+el.cn.addEventListener("input",function(){linked=false;$("linkbadge").textContent="";render();});
+el.mode.addEventListener("change",function(){syncMode();render();});
+["px","pernode","disks","disksize","prot","fail","fill"].forEach(function(k){
+  el[k].addEventListener("input",render);el[k].addEventListener("change",render);
+});
+$("u-tb").addEventListener("click",function(){unit="TB";setUnitButtons();render();});
+$("u-tib").addEventListener("click",function(){unit="TiB";setUnitButtons();render();});
+$("l-en").addEventListener("click",function(){lang="en";applyLang();render();});
+$("l-it").addEventListener("click",function(){lang="it";applyLang();render();});
+$("controls").addEventListener("submit",function(e){e.preventDefault();});
+
+function flash(){var c=$("copied");c.hidden=false;setTimeout(function(){c.hidden=true;},1600);}
+function copy(text){
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(flash,function(){});return;}
+  var t=document.createElement("textarea");t.value=text;document.body.appendChild(t);t.select();
+  try{document.execCommand("copy");flash();}catch(e){}
+  document.body.removeChild(t);
+}
+$("btn-link").addEventListener("click",function(){copy(hashOk?location.href:lastState);});
+$("btn-print").addEventListener("click",function(){window.print();});
+$("btn-summary").addEventListener("click",function(){
+  var r=compute();
+  copy([
+    L.sumTitle,
+    L.sumPx+": "+r.px+"   "+L.sumCn+": "+r.cn,
+    L.sumPer+": "+num(r.per,2)+" TB   "+L.sumRaw+": "+fmt(r.raw),
+    L.sumProf+": "+r.p.label+"   "+L.sumRes+": "+r.F+" "+L.sumNodes+"   "+L.sumFill+": "+Math.round(r.fill*100)+"%",
+    L.sumAfter+": "+fmt(r.afterProt),
+    L.sumNet+": "+fmt(r.net)+"   "+L.sumEff+": "+num(r.raw>0?r.net/r.raw*100:0,1)+"%"
+  ].join("\n"));
+});
+
+if(!location.hash&&(navigator.language||"").toLowerCase().indexOf("it")===0) lang="it";
+readHash();setUnitButtons();syncMode();applyLang();render();
+})();
+</script>
+</body>
+</html>

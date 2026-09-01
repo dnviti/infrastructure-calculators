@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Infrastructure calculators</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Archivo+Narrow:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#10202b;--ink-soft:#48606e;--ink-faint:#7d95a2;--paper:#e9eef1;--card:#ffffff;
+  --rule:#cdd8de;--rule-soft:#e2e9ed;--net:#0e7c86;--focus:#0e7c86;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Archivo","Helvetica Neue",Arial,sans-serif;font-size:15px;line-height:1.55}
+.wrap{max-width:1120px;margin:0 auto;padding:32px 24px 72px}
+header.masthead{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:18px;border-bottom:2px solid var(--ink);margin-bottom:28px}
+header.masthead h1{font-family:"Archivo Narrow","Archivo",sans-serif;font-weight:600;font-size:30px;line-height:1.1;margin:0;letter-spacing:-0.01em}
+header.masthead p{margin:6px 0 0;color:var(--ink-soft);font-size:14px;max-width:54ch}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:3px;padding:20px;display:flex;flex-direction:column;gap:8px;text-decoration:none;color:inherit;transition:border-color .12s ease,transform .12s ease}
+.card:hover{border-color:var(--ink)}
+.card h2{font-family:"Archivo Narrow","Archivo",sans-serif;font-size:18px;font-weight:600;margin:0;letter-spacing:-0.01em;color:var(--ink)}
+.card p{margin:0;font-size:13.5px;color:var(--ink-soft);line-height:1.5;flex:1}
+.card .go{margin-top:6px;font-size:13px;font-weight:600;color:var(--net)}
+.tag{display:inline-block;align-self:flex-start;font-size:11.5px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft);border:1px solid var(--rule);border-radius:2px;padding:2px 8px}
+footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div>
+    <h1>Infrastructure calculators</h1>
+    <p>Small planning tools for infrastructure decisions, served as static pages.</p>
+  </div>
+</header>
+
+<main class="cards">
+  <a class="card" href="proxmox/ceph/proxmox-ceph-capacity-calculator.html">
+    <span class="tag">Proxmox · Ceph</span>
+    <h2>Proxmox + Ceph capacity calculator</h2>
+    <p>Raw capacity, what Ceph keeps after protection, and how much you can fill before the cluster stops accepting writes. Includes failure behaviour, pool profile comparison and a shareable configuration link.</p>
+    <span class="go">Open calculator →</span>
+  </a>
+</main>
+
+<footer>Static site, no tracking. Deployed manually via GitHub Actions.</footer>
+</div>
+</body>
+</html>
