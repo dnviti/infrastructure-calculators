@@ -1,6 +1,6 @@
 name: Deploy GitHub Pages
 
-# Manual deployment: run from Actions → "Deploy GitHub Pages" → Run workflow.
+# Manual deployment: open Actions → "Deploy GitHub Pages" → Run workflow.
 on:
   workflow_dispatch:
 
